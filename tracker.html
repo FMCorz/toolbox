@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tracker XML pruner</title>
+    <script src="https://unpkg.com/turndown/dist/turndown.js"></script>
+    <script src=" https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js "></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100">
+    <div class="max-w-lg mx-auto w-full m-8 p-4 shadow-sm bg-white rounded">
+        <h1 class="mb-4 text-xl text-center">Moodle Tracker issue XML pruner</h1>
+        <p>Download the XML report of the issue, and upload it here:</p>
+        <div class="mt-2 mb-6">
+            <input type="file" id="xmlfile" autocomplete="off">
+        </div>
+        <p class="mt-6">When that is done, click the download button.</p>
+        <div class="mt-2">
+            <button disabled id="dl" type="" button
+                class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:bg-gray-200">Download</button>
+        </div>
+    </div>
+    <script>
+        (async () => {
+            const turndownService = new TurndownService();
+            const xmlfile = document.getElementById('xmlfile');
+            const dlbtn = document.getElementById('dl');
+            let xmlContent = '';
+
+            window.addEventListener('DOMContentLoaded', () => {
+                dlbtn.setAttribute('disabled', true);
+                console.log(xmlfile.value);
+                if (xmlfile.value) {
+                    xmlfile.change();
+                }
+            });
+
+            xmlfile.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                const content = await file.text();
+                xmlContent = content;
+                if (xmlContent) {
+                    dlbtn.removeAttribute('disabled');
+                } else {
+                    dlbtn.setAttribute('disabled', true);
+                }
+            });
+
+            dlbtn.addEventListener('click', () => {
+                if (!xmlContent) {
+                    return;
+                }
+                const prunedXml = pruneXml(xmlContent);
+                const mdl = prunedXml.match(/<key>MDL-([^<]+)<\/key>/)[1];
+                const filename = mdl ? `MDL-${mdl}-pruned.xml` : 'converted.xml';
+                saveAs(new Blob([prunedXml], {
+                    type: 'text/xml'
+                }), filename);
+            });
+
+            function pruneXml(content) {
+                const parser = new DOMParser();
+                const xmlParser = parser.parseFromString(content, "text/xml");
+                const rootNode = xmlParser.querySelector('channel > item');
+                rootNode.querySelector('& > customfields')?.remove();
+                rootNode.querySelector('& > progress')?.remove();
+                rootNode.querySelector('& > aggregateprogress')?.remove();
+                rootNode.querySelector('& > timeestimate')?.remove();
+                rootNode.querySelector('& > timespent')?.remove();
+                rootNode.querySelector('& > issuelinks')?.remove();
+                rootNode.querySelector('& > attachments')?.remove();
+                rootNode.querySelector('& > environment')?.remove();
+                rootNode.querySelector('& > subtasks')?.remove();
+                rootNode.querySelector('& > status')?.remove();
+                rootNode.querySelector('& > statusCategory')?.remove();
+                rootNode.querySelector('& > votes')?.remove();
+                rootNode.querySelector('& > watches')?.remove();
+
+                // Removing and pruning comments.
+                rootNode.querySelectorAll('comment[author=cibot], comment[author=tobic], comment[author=lameze], comment[author=jpataleta]').forEach((comment) => {
+                    let removeNode = true;
+                    if (comment.getAttribute('author') === 'lameze') {
+                        if (comment.textContent.includes('https://ci.moodle.org')) {
+                            comment.textContent = '(failed builds redacted)';
+                        }
+                    } else if (comment.getAttribute('author') === 'jpataleta') {
+                        if (comment.textContent.includes('the on-sync period has ended')) {
+                            comment.remove();
+                        }
+                    } else {
+                        comment.remove();
+                    }
+                });
+
+                const attributesToRemove = ['id', 'iconUrl', 'key'];
+                attributesToRemove.forEach((attr) => {
+                    rootNode.querySelectorAll(`[${attr}]`).forEach(node => node.removeAttribute(attr));
+                });
+
+                function findAndRemoveEmptyContent(node) {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        if (node.textContent.match(/^\s+$/m)) {
+                            const hasNewLine = node.textContent.includes('\n');
+                            node.textContent = node.textContent.trim() + (hasNewLine ? '\n' : '');
+                        }
+                        node.parentNode.normalize();
+                        return;
+                    } else if (node.Type === Node.COMMENT_NODE) {
+                        node.remove();
+                        return;
+                    }
+                    node.childNodes.forEach(findAndRemoveEmptyContent);
+                }
+                findAndRemoveEmptyContent(rootNode);
+
+                const htmlFields = ['description', 'comment'];
+                htmlFields.forEach((field) => {
+                    rootNode.querySelectorAll(field).forEach((node) => {
+                        // Convert HTML text to simple text like markdown.
+                        const div = document.createElement('div');
+                        div.innerHTML = node.textContent;
+
+                        // Replace links with their text.
+                        div.querySelectorAll('a').forEach((a) => {
+                            let text = a.textContent.trim();
+                            if (!text) {
+                                text = a.getAttribute('href') ?? '';
+                            }
+                            if (text.match(/^https?:\/\/github.com/)) {
+                                text = 'github'
+                            } else if (text.match(/^https?:\/\/docs.moodle.org/) || text.match(/^https?:\/\/moodledev.io/)) {
+                                text = text.replace(/^https?:\/\/docs.moodle.org/, 'docs').replace(/^https?:\/\/moodledev.io\/docs/, 'docs');
+                            } else if (text.match(/^https?:\/\/tracker.moodle.org/)) {
+                                text = 'tracker'
+                            }
+                            a.replaceWith(`(link: ${text})`);
+                        });
+
+                        // Replace images with their alt tags, after converting the links.
+                        div.querySelectorAll('img').forEach((img) => {
+                            const alt = img.getAttribute('alt');
+                            img.replaceWith(!alt ? '(image)' : `(image: ${alt})`);
+                        });
+
+                        // Remove all other tags and extraneous whitespace.
+                        let md = turndownService.turndown(div);
+
+                        md = md.split('\n').map(line => {
+                            // Pruning lines with just whitespace.
+                            line = line.replace(/^\s+$/, '').trimRight();
+                            // Removing lines from peer review comments.
+                            if (node.nodeName = 'comment' && line.match(/^\\\[(Y|N|-)\\\]\s/)) {
+                                line = '';
+                            }
+                            return line;
+                        }).join('\n');
+
+                        // Removing too many newlines.
+                        md = md.replace(/\n{2,}/mg, '\n\n');
+
+                        // Here it is.
+                        node.textContent = md.trim();
+                    });
+                });
+
+                return new XMLSerializer().serializeToString(rootNode);
+            };
+        })()
+    </script>
+</body>
+
+</html>
