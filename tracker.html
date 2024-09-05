@@ -54,8 +54,8 @@
                     return;
                 }
                 const prunedXml = pruneXml(xmlContent);
-                const mdl = prunedXml.match(/<key>MDL-([^<]+)<\/key>/)[1];
-                const filename = mdl ? `MDL-${mdl}-pruned.xml` : 'converted.xml';
+                const mdl = prunedXml.match(/<key>([^<]+)<\/key>/)[1];
+                const filename = mdl ? `${mdl}-pruned.xml` : 'converted.xml';
                 saveAs(new Blob([prunedXml], {
                     type: 'text/xml'
                 }), filename);
