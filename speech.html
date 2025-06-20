@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image drag and drop slideshow</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f0f0f0;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .drop-zone {
+      border: 3px dashed #ccc;
+      border-radius: 10px;
+      width: 100%;
+      height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 30px;
+      background-color: #fafafa;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+
+    .drop-zone.dragover {
+      border-color: #007cba;
+      background-color: #e6f3ff;
+    }
+
+    .drop-zone p {
+      color: #666;
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .image-display {
+      display: none;
+      text-align: center;
+    }
+
+    .image-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 30px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .large-image {
+      width: 528px;
+      height: 528px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .small-image {
+      width: 128px;
+      height: 128px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .info {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .info p {
+      margin: 5px 0;
+      color: #333;
+    }
+
+    @media (max-width: 600px) {
+      .image-container {
+        flex-direction: column;
+      }
+
+      .large-image {
+        width: 100%;
+        max-width: 400px;
+        height: auto;
+        aspect-ratio: 1;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Image drag and drop slideshow</h1>
+
+    <div class="drop-zone" id="dropZone">
+      <p>Drag and drop images here or click to select</p>
+      <input type="file" id="fileInput" multiple accept="image/*" style="display: none;">
+    </div>
+
+    <div class="image-display" id="imageDisplay">
+      <div class="image-container">
+        <img id="largeImage" class="large-image" alt="Large view">
+        <img id="smallImage" class="small-image" alt="Small view">
+      </div>
+
+      <div class="info" style="display: none">
+        <p id="imageInfo">Image 1 of 0</p>
+        <p id="intervalInfo">Next change in: <span id="countdown">0</span>ms</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let images = [];
+    let currentIndex = 0;
+    let intervalId = null;
+    let countdownId = null;
+    let nextChangeTime = 0;
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const imageDisplay = document.getElementById('imageDisplay');
+    const largeImage = document.getElementById('largeImage');
+    const smallImage = document.getElementById('smallImage');
+    const imageInfo = document.getElementById('imageInfo');
+    const intervalInfo = document.getElementById('intervalInfo');
+    const countdown = document.getElementById('countdown');
+
+    dropZone.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+
+      const files = Array.from(e.dataTransfer.files);
+      const imageFiles = files.filter(file => file.type.startsWith('image/'));
+
+      if (imageFiles.length > 0) {
+        loadImages(imageFiles);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files);
+      if (files.length > 0) {
+        loadImages(files);
+      }
+    });
+
+    function loadImages(files) {
+      clearInterval(intervalId);
+      clearInterval(countdownId);
+
+      images = [];
+      currentIndex = 0;
+
+      const promises = files.map(file => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            resolve(e.target.result);
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+
+      Promise.all(promises).then(imageUrls => {
+        images = imageUrls;
+        if (images.length > 0) {
+          showImages();
+          startSlideshow();
+        }
+      });
+    }
+
+    function showImages() {
+      imageDisplay.style.display = 'block';
+      displayCurrentImage();
+    }
+
+    function displayCurrentImage() {
+      if (images.length === 0) return;
+
+      const currentImage = images[currentIndex];
+      largeImage.src = currentImage;
+      smallImage.src = currentImage;
+
+      imageInfo.textContent = `Image ${currentIndex + 1} of ${images.length}`;
+    }
+
+    function startSlideshow() {
+      if (images.length <= 1) return;
+
+      function scheduleNext() {
+        const interval = Math.floor(Math.random() * 301) + 50; // 50-350ms
+        nextChangeTime = interval;
+
+        intervalId = setTimeout(() => {
+          const availableIndices = [];
+          for (let i = 0; i < images.length; i++) {
+            if (i !== currentIndex) {
+              availableIndices.push(i);
+            }
+          }
+
+          if (availableIndices.length > 0) {
+            const randomIndex = Math.floor(Math.random() * availableIndices.length);
+            currentIndex = availableIndices[randomIndex];
+          }
+
+          displayCurrentImage();
+          scheduleNext();
+        }, interval);
+
+        startCountdown();
+      }
+
+      scheduleNext();
+    }
+
+    function startCountdown() {
+      clearInterval(countdownId);
+      let remaining = nextChangeTime;
+
+      countdownId = setInterval(() => {
+        remaining -= 10;
+        if (remaining <= 0) {
+          remaining = 0;
+          clearInterval(countdownId);
+        }
+        countdown.textContent = remaining;
+      }, 10);
+    }
+  </script>
+</body>
+
+</html>
